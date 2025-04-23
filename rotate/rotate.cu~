@@ -1,0 +1,133 @@
+Para leer una imagen PNG a un arreglo RGB en C, puedes utilizar una biblioteca como "libpng". Aquí tienes un ejemplo de cómo hacerlo:
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <png.h>
+
+#define PNG_BYTES_TO_CHECK 8
+
+void read_png_file(const char *filename, int *width, int *height, png_bytep **image_data) {
+    FILE *fp = fopen(filename, "rb");
+    if (!fp) {
+        fprintf(stderr, "Error: No se pudo abrir el archivo %s para lectura.\n", filename);
+        exit(EXIT_FAILURE);
+    }
+
+    // Verificar la firma de la imagen PNG
+    unsigned char header[PNG_BYTES_TO_CHECK];
+    fread(header, 1, PNG_BYTES_TO_CHECK, fp);
+    if (png_sig_cmp(header, 0, PNG_BYTES_TO_CHECK)) {
+        fprintf(stderr, "Error: %s no es un archivo PNG válido.\n", filename);
+        fclose(fp);
+        exit(EXIT_FAILURE);
+    }
+
+    // Inicializar la estructura de lectura de PNG
+    png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png_ptr) {
+        fprintf(stderr, "Error: Fallo al inicializar la estructura de lectura de PNG.\n");
+        fclose(fp);
+        exit(EXIT_FAILURE);
+    }
+
+    // Inicializar la estructura de información de PNG
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    if (!info_ptr) {
+        fprintf(stderr, "Error: Fallo al inicializar la estructura de información de PNG.\n");
+        png_destroy_read_struct(&png_ptr, NULL, NULL);
+        fclose(fp);
+        exit(EXIT_FAILURE);
+    }
+
+    // Configurar manejo de errores de libpng
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        fprintf(stderr, "Error: Error durante la lectura de la imagen PNG.\n");
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        exit(EXIT_FAILURE);
+    }
+
+    // Configurar libpng para leer desde el archivo
+    png_init_io(png_ptr, fp);
+    png_set_sig_bytes(png_ptr, PNG_BYTES_TO_CHECK);
+
+    // Leer la información de la imagen PNG
+    png_read_info(png_ptr, info_ptr);
+    int bit_depth = png_get_bit_depth(png_ptr, info_ptr);
+    int color_type = png_get_color_type(png_ptr, info_ptr);
+
+    // Convertir a formato RGB de 24 bits si es necesario
+    if (color_type == PNG_COLOR_TYPE_PALETTE)
+        png_set_palette_to_rgb(png_ptr);
+    if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)
+        png_set_expand_gray_1_2_4_to_8(png_ptr);
+    if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS))
+        png_set_tRNS_to_alpha(png_ptr);
+    if (bit_depth == 16)
+        png_set_strip_16(png_ptr);
+    if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
+        png_set_gray_to_rgb(png_ptr);
+
+    // Actualizar la información de la imagen
+    png_read_update_info(png_ptr, info_ptr);
+
+    // Obtener la información de la imagen
+    *width = png_get_image_width(png_ptr, info_ptr);
+    *height = png_get_image_height(png_ptr, info_ptr);
+    int row_bytes = png_get_rowbytes(png_ptr, info_ptr);
+
+    // Reservar memoria para los datos de la imagen
+    *image_data = (png_bytep*)malloc(sizeof(png_bytep) * (*height));
+    for (int i = 0; i < *height; i++) {
+        (*image_data)[i] = (png_byte*)malloc(row_bytes);
+    }
+
+    // Leer los datos de la imagen
+    png_bytep row_pointers[*height];
+    for (int i = 0; i < *height; i++) {
+        row_pointers[i] = (*image_data)[i];
+    }
+    png_read_image(png_ptr, row_pointers);
+
+    // Finalizar la lectura
+    png_read_end(png_ptr, NULL);
+    png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+    fclose(fp);
+}
+
+void free_image_data(png_bytep *image_data, int height) {
+    for (int i = 0; i < height; i++) {
+        free((*image_data)[i]);
+    }
+    free(*image_data);
+}
+
+int main() {
+    const char *filename = "example.png";
+    int width, height;
+    png_bytep *image_data;
+
+    read_png_file(filename, &width, &height, &image_data);
+
+    // Imprimir información de la imagen
+    printf("Ancho: %d, Alto: %d\n", width, height);
+
+       // Acceder a los datos de la imagen
+    for (int y = 0; y < height; y++) {
+        png_bytep row = image_data[y];
+        for (int x = 0; x < width * 3; x += 3) { // Cada píxel RGB ocupa 3 bytes
+            // Acceder a los valores R, G, B del píxel
+            png_byte r = row[x];
+            png_byte g = row[x + 1];
+            png_byte b = row[x + 2];
+            // Hacer algo con los valores (por ejemplo, imprimirlos)
+            printf("Pixel en (%d, %d): R=%d, G=%d, B=%d\n", x / 3, y, r, g, b);
+        }
+    }
+
+    // Liberar memoria después de su uso
+    free_image_data(image_data, height);
+
+    return 0;
+}
